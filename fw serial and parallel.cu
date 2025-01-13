@@ -93,16 +93,7 @@ _global_ void floyd_warshall_kernel(int *dp, int N, int k) {
   }
 }
 
-
-
-int main(int argc, char **argv)
-{
-    if (argc != 2)
-    {
-        printf("USAGE: ./floyd_serial <number_of_vertices>\n");
-        return 1;
-    }
-
+void serial_fw(int n_vertices) {
     int n_vertices;
     n_vertices = atoi(argv[1]);
 
@@ -169,6 +160,17 @@ int main(int argc, char **argv)
 
     free(adjacency_matrix);
     free(dp_matrix);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+    {
+        printf("USAGE: ./floyd_serial <number_of_vertices>\n");
+        return 1;
+    }
+
+    
 
     return 0;
 }
