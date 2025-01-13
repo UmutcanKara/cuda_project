@@ -94,13 +94,26 @@ _global_ void floyd_warshall_kernel(int *dp, int N, int k) {
 }
 
 void serial_fw(int n_vertices) {
+
+}
+
+int main(int argc, char **argv)
+{
+    if (argc != 2)
+    {
+        printf("USAGE: ./floyd_serial <number_of_vertices>\n");
+        return 1;
+    }
+
     int n_vertices;
     n_vertices = atoi(argv[1]);
 
+    
+    
     // Allocate memory for matrices
-    dp_matrix = malloc(n_vertices * n_vertices * sizeof(int));
+    cudaMalloc(&dp_matrix, n_vertices * n_vertices * sizeof(int));
 
-    generate_random_adj_matrix(n_vertices);
+    generate_random_adj_matrix_kernel<<<40,32>>>(n_vertices);
 
     clock_t start = clock(); /* Start measuring execution time */
 
@@ -160,16 +173,6 @@ void serial_fw(int n_vertices) {
 
     free(adjacency_matrix);
     free(dp_matrix);
-}
-
-int main(int argc, char **argv)
-{
-    if (argc != 2)
-    {
-        printf("USAGE: ./floyd_serial <number_of_vertices>\n");
-        return 1;
-    }
-
     
 
     return 0;
