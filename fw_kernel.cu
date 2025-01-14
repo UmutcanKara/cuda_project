@@ -112,7 +112,6 @@ int main(int argc, char **argv)
     }
     check_last_error();
     clock_t end2 = clock();
-    print_adjacency_matrix_kernel<<<2,1024>>>(n_vertices,adjacency_matrix);
 
     cudaFree(adjacency_matrix);
     cudaFree(dp_matrix);
