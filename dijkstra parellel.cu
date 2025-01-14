@@ -68,6 +68,17 @@ void print_adjacency_matrix(int V, int *adjacency_matrix)
     }
 }
 
+__global__ void print_adjacency_matrix_kernel(int V, int *adjacency_matrix)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = blockDim.x * gridDim.x;
+    for(int i=tid; i < V; i+=stride)
+        {
+            printf("%d",adjacency_matrix[i]);
+        }
+}
+
+
 /* Finds vertex with the minimum distance among the vertices that have not been visited yet */
 int find_min_distance(int V, int *distance, boolean *visited)
 {
@@ -137,6 +148,18 @@ __global__ void dijkstra_kernel(int V, int *adjacency_matrix, int *len, int *tem
 
 }
 
+__global__ void init_vars(int *len, int *temp_distance, boolean *visited, int source, int V)
+{
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+        for (int i = tid; i < V; i+=stride) /* Initialize vars arrays to current source */
+        {
+            visited[i] = FALSE;
+            temp_distance[i] = INFNTY;
+            len[source * V + i] = INFNTY;
+        }
+}
+
 
 
 int main(int argc, char **argv)
@@ -167,7 +190,7 @@ int main(int argc, char **argv)
     cudaMalloc(&visited, V * sizeof(boolean));
     cudaMalloc(&len, V * V * sizeof(int));
     cudaMalloc(&adjacency_matrix, V * V * sizeof(int));
-    cudaMalloc(&temp_distance, V * sizeof(int));
+    cudaMalloc(&temp_distance, V * sizeof(boolean));
 
     
     curandState *d_states;
@@ -196,6 +219,18 @@ int main(int argc, char **argv)
     end = clock();
     seconds = (float)(end - start) / CLOCKS_PER_SEC;
     printf("TIME FOR ALL PAIRS DIJKSTRA ON GPU = %f SECS\n", seconds);
+
+    print_adjacency_matrix_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix);
+    cudaDeviceSynchronize();
+    
+    boolean * visitedHost;
+    cudaMallocHost(&visitedHost, V * sizeof(boolean)); 
+    cudaMemcpy(visitedHost, visited, V * sizeof(boolean), cudaMemcpyDeviceToHost);
+    boolean * matrixhost;
+    cudaMallocHost(&matrixhost, V * sizeof(int)); 
+    cudaMemcpy(matrixhost, adjacency_matrix, V * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    print_adjacency_matrix(V,matrixhost);
     
     /* print_adjacency_matrix(V, adjacency_matrix); */
     cudaFree(visited);
