@@ -69,7 +69,8 @@ void dijkstra_serial(int V, int *adjacency_matrix, int *len, int *temp_distance)
     clock_t start = clock(); /* Records the start time for measuring the execution time */
 
     /* Computing the All Pairs Shortest Paths (APSP) in the graph */
-    int source = 0;
+    // CHANGE TO SOURCE < 1 FOR SINGLE SOURCE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    for(int source = 0; source < V; source++){
     
         for (int i = 0; i < V; i++) /* Initialize vars arrays to current source */
         {
@@ -99,6 +100,7 @@ void dijkstra_serial(int V, int *adjacency_matrix, int *len, int *temp_distance)
                 }
             }
         }
+    }
     
 
     /* Records the end time for measuring the execution time */
