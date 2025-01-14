@@ -5,7 +5,7 @@ NSYS=nsys profile
 NSYSFLAGS=--stats=true --force-overwrite=true
 
 
-djk: dijkstra.cu
+djk: dijkstra parellel.cu
 	$(CUDACXX) $(CUDACXXFLAGS) -Xcompiler="$(CXXFLAGS)" streams.cu -o streams
 
 fw: streams_solution.cu
