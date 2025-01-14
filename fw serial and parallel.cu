@@ -3,83 +3,48 @@
 #include <time.h>
 #include <math.h>
 #include <limits.h>
-
+#include <curand_kernel.h>
 #define INFNTY INT_MAX
+#include "helpers.cuh"
+#include "encryption.cuh"
 
-int *adjacency_matrix, *dp_matrix;
+//__device__ int *adjacency_matrix, *dp_matrix;
+
+
+
+__global__ void setup_kernel(curandState *state, unsigned long seed) {
+    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    curand_init(seed, id, 0, &state[id]); // Initialize state
+}
+
 
 /* Undirected graph non-negative edge weights */
 /* This function generates linearized 2D array of length N*N */
-void generate_random_adj_matrix(int n_vertices)
-{
-    int N = n_vertices;
-    int i, j;
 
-    /* Allocate memory for adjacency matrix 2D array */
-    adjacency_matrix = malloc(N * N * sizeof(int));
-
-
-    srand(0);
-    for (i = 0; i < N; i++)
-    {
-        for (j = i; j < N; j++)
-        {
-            if (i == j)
-            {
-                adjacency_matrix[i*N+j] = 0; /* Diagonal */
-                adjacency_matrix[j*N+i] = 0; /* Diagonal */
-            }
-            else
-            {
-                /* Zero to nine random */
-                int r = rand() % 10;
-                int val = (r == 2) ? INFNTY : r; /* No edge between vertices */
-                adjacency_matrix[i*N + j] = val;    /* Symmetrically */
-                adjacency_matrix[j*N +i] = val;
-            }
-        }
-    }
-}
-_global_ void generate_random_adj_matrix_kernel(int N){
+__global__ void generate_random_adj_matrix_kernel(int N, int *adjacency_matrix ,curandState *state, int *randomNumbers) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-  srand(0);
+
   if (i == j){
     adjacency_matrix[i*N+j] = 0;
     adjacency_matrix[j*N+i] = 0;
   }
   else{
-    int r = rand() % 10;
+    int r;
+    float rand = curand_uniform(state);
+    curandState localState = state[i];
+    r = (int)(curand_uniform(&localState) * 10.0f);
+
+
     int val = (r == 2) ? INFNTY : r; /* No edge between vertices */
     adjacency_matrix[i*N + j] = val;
     adjacency_matrix[j*N + i] = val;
   }
 }
 
-void floyd_warshall_serial(int **graph, int **dp, int N)
-{
-    int i, j, k;
-    /* Initialize copy graph to dp matrix */
-    for (i = 0; i < N; i++)
-        for (j = 0; j < N; j++)
-            dp[i][j] = graph[i][j];
 
-    /* Floyd Warshall algorithm */
-    for (k = 0; k < N; k++)
-    {
-        for (i = 0; i < N; i++)
-        {
-            for (j = 0; j < N; j++)
-            {
-                if (dp[i][k] + dp[k][j] < dp[i][j])
-                    dp[i][j] = dp[i][k] + dp[k][j];
-            }
-        }
-    }
-}
-// 10000
-_global_ void floyd_warshall_kernel(int *dp, int N, int k) {
+__global__ void floyd_warshall_kernel(int *dp, int N, int k) {
   int i, j;
   i = blockIdx.x * blockDim.x + threadIdx.x;
   j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -93,8 +58,14 @@ _global_ void floyd_warshall_kernel(int *dp, int N, int k) {
   }
 }
 
-void serial_fw(int n_vertices) {
-
+__global__ void print_adjacency_matrix_kernel(int V, int *adjacency_matrix)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    int stride = blockDim.x * gridDim.x;
+    for(int i=tid; i < V; i+=stride)
+        {
+            printf("%d\n",adjacency_matrix[i]);
+        }
 }
 
 int main(int argc, char **argv)
@@ -108,72 +79,51 @@ int main(int argc, char **argv)
     int n_vertices;
     n_vertices = atoi(argv[1]);
 
-    
-    
+    dim3 blocksPerGrid = (16,16);
+    dim3 threadsPerBlock = (32,32);
+
+    int *adjacency_matrix, *dp_matrix;
+
+
+
+
     // Allocate memory for matrices
     cudaMalloc(&dp_matrix, n_vertices * n_vertices * sizeof(int));
+    cudaMalloc(&adjacency_matrix, n_vertices * n_vertices * sizeof(int));
 
-    generate_random_adj_matrix_kernel<<<40,32>>>(n_vertices);
+    // init curandom
+    curandState *d_states;
+    int* d_randomNumbers;
+    cudaMalloc(&d_randomNumbers, n_vertices * n_vertices * sizeof(int));
+    cudaMalloc(&d_states, n_vertices * n_vertices*  sizeof(curandState));
 
-    clock_t start = clock(); /* Start measuring execution time */
+    // Setup CURAND states
+    setup_kernel<<<blocksPerGrid, threadsPerBlock>>>(d_states, time(NULL));
 
+    clock_t start1 = clock(); /* Start measuring execution time */
+    generate_random_adj_matrix_kernel<<<blocksPerGrid,threadsPerBlock>>>(n_vertices,adjacency_matrix,  d_states, d_randomNumbers);
+    cudaDeviceSynchronize();
 
-
-    // Define the number of streams.
-    const uint64_t num_streams = 32;
-    const int blocksPerGrid = 32;
-    const int threadsPerBlock = 1024;
-
-    const uint64_t chunk_size = sdiv(n_vertices, num_streams);
-    uint64_t * data_cpu, * data_gpu;
-    cudaMallocHost(&data_cpu, sizeof(uint64_t)n_vertices n_vertices);
-    cudaMalloc    (&data_gpu, sizeof(uint64_t)n_vertices n_vertices);
-    check_last_error();
-
-    cudaStream_t streams[num_streams];
-
-    for (uint64_t i = 0; i < num_streams; i++){
-      cudaStreamCreate(&streams[i]);
+    clock_t end1 = clock();
+    clock_t start2 = clock(); /* Start measuring execution time */
+    for (int i = 0; i < n_vertices; i++){
+      floyd_warshall_kernel<<<blocksPerGrid, threadsPerBlock>>>(adjacency_matrix, n_vertices, i);
+      cudaDeviceSynchronize();
     }
     check_last_error();
+    clock_t end2 = clock();
+    print_adjacency_matrix_kernel<<<2,1024>>>(n_vertices,adjacency_matrix);
+
+    cudaFree(adjacency_matrix);
+    cudaFree(dp_matrix);
+
+    float seconds;
+    seconds = (float)(end1 - start1) / CLOCKS_PER_SEC;
+    printf("TIME FOR GRAPH GENERATION ON GPU = %f SECS\n", seconds);
+    seconds = (float)(end2 - start2) / CLOCKS_PER_SEC;
+    printf("TIME FOR ALL PAIRS Floyd ON GPU = %f SECS\n", seconds);
 
 
-
-    for (uint64_t stream = 0; stream < num_streams; stream++) {
-
-        // ...calculate index into global data (lower) and size of data for it to process (width).
-        const uint64_t lower = chunk_size*stream;
-        const uint64_t upper = min(lower+chunk_size, n_vertices);
-        const uint64_t width = upper-lower;
-
-        // ...copy stream's chunk to device.
-        cudaMemcpyAsync(data_gpu+lower, data_cpu+lower,
-               sizeof(uint64_t)*width, cudaMemcpyHostToDevice,
-               streams[stream]);
-        floyd_warshall_kernel<<<blocksPerGrid, threadsPerBlock, 0, streams[stream]>>>();
-
-//        // ...compute stream's chunk.
-//        decrypt_gpu<<<80*32, 64, 0, streams[stream]>>>
-//            (data_gpu+lower, width, num_iters);
-//
-//        // ...copy stream's chunk to host.
-//        cudaMemcpyAsync(data_cpu+lower, data_gpu+lower,
-//               sizeof(uint64_t)*width, cudaMemcpyDeviceToHost,
-//               streams[stream]);
-    }
-
-
-    for (uint64_t stream = 0; stream < num_streams; stream++){
-        cudaStreamSynchronize(streams[stream]);
-    }
-
-    timer.stop("total time on GPU");
-    check_last_error();
-
-
-    free(adjacency_matrix);
-    free(dp_matrix);
-    
 
     return 0;
 }
