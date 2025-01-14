@@ -24,49 +24,25 @@ __global__ void generate_random_graph_kernel(int V, int *adjacency_matrix, curan
     int tid = blockIdx.x*blockDim.x+threadIdx.x;
     int stride = blockDim.x*gridDim.x;
 
-    // Generate a random number and map it to [1, 10]
-    curandState localState = state[tid];
-    randomNumbers[tid] = 1 + (int)(curand_uniform(&localState) * 10.0f); // Scale and shift
-    state[tid] = localState; // Save state
-
     for (int i = tid; i < V; i+=stride)
     {
         for (int j = 0; j < V; j++)
         {
-            if (i != j)
-            {
-                int id = threadIdx.x + blockIdx.x * blockDim.x;
+            int r;
+            curandState localState = state[i];
+            r = (int)(curand_uniform(&localState) * 10.0f);
 
-                // Generate a random number
-                curandState localState = state[id];
-                randomNumbers[id] = curand_uniform(&localState);
-            
-                // Update the state
-                state[id] = localState;
-                adjacency_matrix[i * V + j] = randomNumbers[tid];                 /* Assign a random value corresponding to the edge */
-                adjacency_matrix[j * V + i] = adjacency_matrix[i * V + j]; /* Graph is undirected, the adjacency matrix is symmetric */
+            if (i < j) {
+                adjacency_matrix[i * V + j] = r;                 /* Assign a random value corresponding to the edge */
+                adjacency_matrix[j * V + i] = r; /* Graph is undirected, the adjacency matrix is symmetric */
+               }
+            state[i] = localState;
             }
-            else
-            {
-                adjacency_matrix[i * V + j] = 0;
-            }
+        adjacency_matrix[i * V + i] = 0;
+        
         }
     }
-}
 
-/* Print adjacency matrix */
-void print_adjacency_matrix(int V, int *adjacency_matrix)
-{
-    printf("\nADJACENCY MATRIX:\n");
-    for (int i = 0; i < V; i++)
-    {
-        for (int j = 0; j < V; j++)
-        {
-            printf("%d ", adjacency_matrix[i * V + j]);
-        }
-        printf("\n");
-    }
-}
 
 __global__ void print_adjacency_matrix_kernel(int V, int *adjacency_matrix)
 {
@@ -74,31 +50,13 @@ __global__ void print_adjacency_matrix_kernel(int V, int *adjacency_matrix)
     int stride = blockDim.x * gridDim.x;
     for(int i=tid; i < V; i+=stride)
         {
-            printf("%d",adjacency_matrix[i]);
+            printf("matrix[%d] = %d\n",i,adjacency_matrix[i]);
         }
 }
 
-
-/* Finds vertex with the minimum distance among the vertices that have not been visited yet */
-int find_min_distance(int V, int *distance, boolean *visited)
-{
-    int min_distance = INFNTY; /* Init value */
-    int min_index = -1;
-
-    for (int v = 0; v < V; v++) /* Iterates over all vertices */
-    {
-        if (!visited[v] && distance[v] <= min_distance)
-        {
-            min_distance = distance[v];
-            min_index = v;
-        }
-    }
-    return min_index;
-}
 
 __global__ void dijkstra_kernel(int V, int *adjacency_matrix, int *len, int *temp_distance, boolean *visited)
 {
-
 
     /* Computing the All Pairs Shortest Paths (APSP) in the graph */
     int tid = blockIdx.x*blockDim.x+threadIdx.x;
@@ -145,19 +103,6 @@ __global__ void dijkstra_kernel(int V, int *adjacency_matrix, int *len, int *tem
             }
         }
         }
-
-}
-
-__global__ void init_vars(int *len, int *temp_distance, boolean *visited, int source, int V)
-{
-    int tid = blockIdx.x*blockDim.x+threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-        for (int i = tid; i < V; i+=stride) /* Initialize vars arrays to current source */
-        {
-            visited[i] = FALSE;
-            temp_distance[i] = INFNTY;
-            len[source * V + i] = INFNTY;
-        }
 }
 
 
@@ -172,9 +117,7 @@ int main(int argc, char **argv)
     }
     
     int deviceId;
-    // how many gpus
     cudaGetDevice(&deviceId);
-    // properties for each gpu
     cudaDeviceProp props;
     cudaGetDeviceProperties(&props, deviceId);
     int sm_count = props.multiProcessorCount;
@@ -184,55 +127,38 @@ int main(int argc, char **argv)
     int numberOfBlocks = sm_count*16;
 
     int V = atoi(argv[1]); /* Number of vertices */
-    int *adjacency_matrix;
+    int * adjacency_matrix;
     int *len, *temp_distance;
     boolean *visited;
+    
     cudaMalloc(&visited, V * sizeof(boolean));
     cudaMalloc(&len, V * V * sizeof(int));
     cudaMalloc(&adjacency_matrix, V * V * sizeof(int));
     cudaMalloc(&temp_distance, V * sizeof(boolean));
-
     
     curandState *d_states;
     int* d_randomNumbers;
-    cudaMalloc(&d_randomNumbers, V * sizeof(int));
-    cudaMalloc(&d_states, V * sizeof(curandState));
+    cudaMalloc(&d_randomNumbers, V * V * sizeof(int));
+    cudaMalloc(&d_states, V * V * sizeof(curandState));
 
-    clock_t start = clock(); /* Records the start time for measuring the execution time */
     // Setup CURAND states
-    
     setup_kernel<<<numberOfBlocks, threadsPerBlock>>>(d_states, time(NULL));
     
+    clock_t start = clock(); /* Records the start time for measuring the execution time */
     generate_random_graph_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix, d_states, d_randomNumbers);
-    /* Records the end time for measuring the execution time */
-    clock_t end = clock();
+    cudaDeviceSynchronize();
+    clock_t end = clock();   /* Records the end time for measuring the execution time */
     float seconds = (float)(end - start) / CLOCKS_PER_SEC;
     printf("TIME TO CREATE GRAPH ON GPU = %f SECS\n", seconds);
-
+    
     start = clock(); /* Records the start time for measuring the execution time */
 
     dijkstra_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix, len, temp_distance, visited);
-
     cudaDeviceSynchronize();
-    
-    /* Records the end time for measuring the execution time */
-    end = clock();
+    end = clock(); /* Records the end time for measuring the execution time */
     seconds = (float)(end - start) / CLOCKS_PER_SEC;
     printf("TIME FOR ALL PAIRS DIJKSTRA ON GPU = %f SECS\n", seconds);
-
-    print_adjacency_matrix_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix);
-    cudaDeviceSynchronize();
     
-    boolean * visitedHost;
-    cudaMallocHost(&visitedHost, V * sizeof(boolean)); 
-    cudaMemcpy(visitedHost, visited, V * sizeof(boolean), cudaMemcpyDeviceToHost);
-    boolean * matrixhost;
-    cudaMallocHost(&matrixhost, V * sizeof(int)); 
-    cudaMemcpy(matrixhost, adjacency_matrix, V * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
-    print_adjacency_matrix(V,matrixhost);
-    
-    /* print_adjacency_matrix(V, adjacency_matrix); */
     cudaFree(visited);
     cudaFree(len);
     cudaFree(temp_distance);
