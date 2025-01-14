@@ -137,70 +137,7 @@ __global__ void dijkstra_kernel(int V, int *adjacency_matrix, int *len, int *tem
 
 }
 
-__global__ void init_vars(int *len, int *temp_distance, boolean *visited, int source, int V)
-{
-    int tid = blockIdx.x*blockDim.x+threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-        for (int i = tid; i < V; i+=stride) /* Initialize vars arrays to current source */
-        {
-            visited[i] = FALSE;
-            temp_distance[i] = INFNTY;
-            len[source * V + i] = INFNTY;
-        }
-}
 
-__global__ void dijkstra_kernel_single_source(int V, int *adjacency_matrix, int *len, int *temp_distance, boolean *visited)
-{
-
-    clock_t start = clock(); /* Records the start time for measuring the execution time */
-
-    /* Computing the Single Source Shortest Path in the graph */
-    int tid = blockIdx.x*blockDim.x+threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    int source = 0;
-    
-    for (int i = tid; i < V; i+=stride) /* Initialize vars arrays to current source */
-        {
-            visited[i] = FALSE;
-            temp_distance[i] = INFNTY;
-            len[source * V + i] = INFNTY;
-        }
-    
-    len[source * V + source] = 0; /* Set the distance of the source vertex as 0 */
-
-        for (int count = 0; count < V - 1; count++)
-        {
-            /* Finds the vertex with the minimum distance from the current source vertex */
-            int min_distance = INFNTY; /* Init value */
-            int min_index = -1;
-        
-            for (int v = 0; v < V; v++) /* Iterates over all vertices */
-            {
-                if (!visited[v] && len[v] <= min_distance)
-                {
-                    min_distance = len[v];
-                    min_index = v;
-                }
-            }
-            
-            int current_vertex = min_index;
-            visited[current_vertex] = TRUE;
-
-            for (int v = 0; v < V; v++)
-            {
-                int weight = adjacency_matrix[current_vertex * V + v];
-                if (!visited[v] && weight && len[source * V + current_vertex] != INFNTY &&
-                    len[source * V + current_vertex] + weight < len[source * V + v])
-                {
-                    /* Updating the distance is beneficial */
-                    len[source * V + v] = len[source * V + current_vertex] + weight;
-                    temp_distance[v] = len[source * V + v];
-                }
-            }
-        }
-
-    
-}
 
 int main(int argc, char **argv)
 {
@@ -230,7 +167,7 @@ int main(int argc, char **argv)
     cudaMalloc(&visited, V * sizeof(boolean));
     cudaMalloc(&len, V * V * sizeof(int));
     cudaMalloc(&adjacency_matrix, V * V * sizeof(int));
-    cudaMalloc(&temp_distance, V * sizeof(boolean));
+    cudaMalloc(&temp_distance, V * sizeof(int));
 
     
     curandState *d_states;
@@ -238,21 +175,27 @@ int main(int argc, char **argv)
     cudaMalloc(&d_randomNumbers, V * sizeof(int));
     cudaMalloc(&d_states, V * sizeof(curandState));
 
-        // Setup CURAND states
-    setup_kernel<<<numberOfBlocks, threadsPerBlock>>>(d_states, time(NULL));
-
-    generate_random_graph_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix, d_states, d_randomNumbers);
-    
     clock_t start = clock(); /* Records the start time for measuring the execution time */
+    // Setup CURAND states
+    
+    setup_kernel<<<numberOfBlocks, threadsPerBlock>>>(d_states, time(NULL));
+    
+    generate_random_graph_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix, d_states, d_randomNumbers);
+    /* Records the end time for measuring the execution time */
+    clock_t end = clock();
+    float seconds = (float)(end - start) / CLOCKS_PER_SEC;
+    printf("TIME TO CREATE GRAPH ON GPU = %f SECS\n", seconds);
+
+    start = clock(); /* Records the start time for measuring the execution time */
 
     dijkstra_kernel<<<numberOfBlocks, threadsPerBlock>>>(V, adjacency_matrix, len, temp_distance, visited);
 
     cudaDeviceSynchronize();
     
     /* Records the end time for measuring the execution time */
-    clock_t end = clock();
-    float seconds = (float)(end - start) / CLOCKS_PER_SEC;
-    printf("TOTAL ELAPSED TIME ON GPU = %f SECS\n", seconds);
+    end = clock();
+    seconds = (float)(end - start) / CLOCKS_PER_SEC;
+    printf("TIME FOR ALL PAIRS DIJKSTRA ON GPU = %f SECS\n", seconds);
     
     /* print_adjacency_matrix(V, adjacency_matrix); */
     cudaFree(visited);
