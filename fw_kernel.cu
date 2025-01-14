@@ -9,7 +9,6 @@
 #include "helpers.cuh"
 #include "encryption.cuh"
 
-//__device__ int *adjacency_matrix, *dp_matrix;
 
 
 
