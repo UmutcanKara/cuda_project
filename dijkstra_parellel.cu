@@ -112,7 +112,7 @@ int main(int argc, char **argv)
 
     if (argc != 2)
     {
-        printf("USAGE: ./dijkstra_serial <number_of_vertices>\n");
+        printf("USAGE: ./dijkstra_parallel <number_of_vertices>\n");
         return 1;
     }
     
